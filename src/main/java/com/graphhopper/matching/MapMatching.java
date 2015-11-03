@@ -72,9 +72,8 @@ public class MapMatching {
     // later we'll detect loops and insert the correctly detected road recursivly
     // see #1
     private double separatedSearchDistance = 300;
-    // e.g. 5 as multiplier is not sufficient as we guess the weight via distance weighting.getMinWeight(distance)
-    // should we use the 'visited nodes' as more generic limit?
-    private double maxSearchMultiplier = 50;
+    private int maxNodesToVisit = 500;
+    private final double maxSearchWeightMultiplier = 50;
     private final int nodeCount;
     private DistanceCalc distanceCalc = new DistancePlaneProjection();
     private boolean forceRepair;
@@ -112,8 +111,8 @@ public class MapMatching {
         return this;
     }
 
-    public void setMaxSearchMultiplier(int maxSearchMultiplier) {
-        this.maxSearchMultiplier = maxSearchMultiplier;
+    public void setMaxNodesToVisit(int maxNodesToVisit) {
+        this.maxNodesToVisit = maxNodesToVisit;
     }
 
     public void setForceRepair(boolean forceRepair) {
@@ -332,9 +331,9 @@ public class MapMatching {
             goalSet.add(qr.getClosestNode());
         }
 
-        //////// Search Phase (3) ////////
-        CustomDijkstra algo = new CustomDijkstra(goalSet, queryGraph, encoder, customWeighting, traversalMode);
-        algo.setWeightLimit(customWeighting.getMinWeight(gpxLength * maxSearchMultiplier));
+        //////// Search Phase (3) ////////        
+        CustomDijkstra algo = new CustomDijkstra(goalSet, queryGraph, encoder, customWeighting,
+                traversalMode, maxNodesToVisit, maxSearchWeightMultiplier);
 
         // Set an approximative weight for start nodes.
         // The method initFrom uses minimum weight if two QueryResult edges share same node        
@@ -344,13 +343,16 @@ public class MapMatching {
 
             // TODO take speed from edge instead of taking default speed and reducing it via maxSearchMultiplier        
             // encoder.getSpeed(qr.getClosestEdge().getFlags())
-            algo.initFrom(qr.getClosestNode(), customWeighting.getMinWeight(distance * maxSearchMultiplier));
+            algo.initFrom(qr.getClosestNode(), customWeighting.getMinWeight(distance * maxSearchWeightMultiplier));
         }
 
         algo.runAlgo();
         if (!algo.oneNodeWasReached()) {
-            throw new RuntimeException("Cannot find matching path! Missing or old OpenStreetMap data? "
-                    + gpxList.size() + ", " + startQRList + ", " + endQRList);
+            throw new RuntimeException("Cannot find matching path! Wrong vehicle " + encoder
+                    + " or missing OpenStreetMap data? Try to increase maxNodesToVisit ("
+                    + maxNodesToVisit + "). Current gpx sublist:"
+                    + gpxList.size() + ", start list:" + startQRList + ", end list:" + endQRList
+                    + ", bounds: " + graph.getBounds());
         }
 
         // choose a good end point i.e. close to query point but also close to the start points
@@ -458,10 +460,15 @@ public class MapMatching {
 
         private final TIntHashSet goalNodeSet;
         private boolean oneNodeWasReached = false;
+        private final int maxNodesToVisit;
+        private final double maxSearchWeightMultiplier;
 
-        public CustomDijkstra(TIntHashSet goalNodeSet, Graph g, FlagEncoder encoder, Weighting weighting, TraversalMode tMode) {
+        public CustomDijkstra(TIntHashSet goalNodeSet, Graph g, FlagEncoder encoder, Weighting weighting,
+                TraversalMode tMode, int maxNodesToVisit, double maxSearchWeightMultiplier) {
             super(g, encoder, weighting, tMode);
             this.goalNodeSet = goalNodeSet;
+            this.maxNodesToVisit = maxNodesToVisit;
+            this.maxSearchWeightMultiplier = maxSearchWeightMultiplier;
         }
 
         public void initFrom(int node, double weight) {
@@ -495,6 +502,11 @@ public class MapMatching {
                     return true;
                 }
             }
+
+            if (getVisitedNodes() > maxNodesToVisit) {
+                return true;
+            }
+
             return false;
         }
 
@@ -505,7 +517,7 @@ public class MapMatching {
             for (QueryResult qr : endQRs) {
                 int node = qr.getClosestNode();
                 EdgeEntry tmp1 = fromMap.get(node);
-                double w = weighting.getMinWeight(qr.getQueryDistance() * maxSearchMultiplier);
+                double w = weighting.getMinWeight(qr.getQueryDistance() * maxSearchWeightMultiplier);
                 if (tmp1 != null && bestWeight > tmp1.weight + w) {
                     currEdge = tmp1;
                     bestWeight = tmp1.weight + w;
@@ -649,7 +661,7 @@ public class MapMatching {
         @Override
         public Path setFromNode(int from) {
             return super.setFromNode(from);
-        }                
+        }
     };
 
     public InstructionList calcInstructions(MatchResult mr, Translation tr) {
