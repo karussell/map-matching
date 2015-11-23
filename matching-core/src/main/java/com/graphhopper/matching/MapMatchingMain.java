@@ -17,12 +17,17 @@
  */
 package com.graphhopper.matching;
 
+import com.graphhopper.GHResponse;
 import com.graphhopper.GraphHopper;
 import com.graphhopper.storage.GraphStorage;
+import com.graphhopper.routing.Path;
+import com.graphhopper.routing.util.FlagEncoder;
+import com.graphhopper.storage.GraphHopperStorage;
 import com.graphhopper.storage.index.LocationIndexTree;
 import com.graphhopper.util.*;
 import java.io.File;
 import java.io.FilenameFilter;
+import java.util.Collections;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,12 +117,17 @@ public class MapMatchingMain {
 
                     String outFile = gpxFile.getAbsolutePath() + ".res.gpx";
                     System.out.println("\texport results to:" + outFile);
+
                     InstructionList il;
-                    if (tr == null || instructions.isEmpty()) {
+                    if (instructions.isEmpty()) {
                         il = new InstructionList(null);
                     } else {
-                        il = mapMatching.calcInstructions(mr, tr);
+                        GHResponse matchGHRsp = new GHResponse();
+                        Path path = mapMatching.calcPath(mr);
+                        new PathMerger().doWork(matchGHRsp, Collections.singletonList(path), tr);
+                        il = matchGHRsp.getInstructions();
                     }
+
                     new GPXFile(mr, il).doExport(outFile);
                 } catch (Exception ex) {
                     importSW.stop();
